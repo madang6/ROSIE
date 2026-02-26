@@ -1,0 +1,9 @@
+[project]
+name = "rosie"
+version = "0.1.0"
+description = "ROS 2 Orchestration through Semantic Introspection and Execution"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
