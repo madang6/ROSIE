@@ -416,6 +416,72 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    # ---- Heart configuration (bootstrap) ----
+    {
+        "type": "function",
+        "function": {
+            "name": "heart_auto_configure",
+            "description": (
+                "Automatically discover the robot by scanning the ROS 2 topic "
+                "graph and configure the Heart's subscriptions and publishers "
+                "to match. Identifies PX4 drones, ground robots, manipulators, "
+                "cameras, etc. Call this FIRST before issuing any control commands."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "heart_configure",
+            "description": (
+                "Manually reconfigure the Heart's topic subscriptions and "
+                "publishers. Use this to override auto_configure or to connect "
+                "to non-standard topics. All parameters are optional; pass only "
+                "the topics you want (None = disabled). Resets state and flight "
+                "phase."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "odom_topic": {
+                        "type": "string",
+                        "description": "nav_msgs/Odometry topic (e.g. '/odom').",
+                    },
+                    "vehicle_odom_topic": {
+                        "type": "string",
+                        "description": "PX4 VehicleOdometry topic (e.g. '/fmu/out/vehicle_odometry').",
+                    },
+                    "image_topics": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "CompressedImage topics to subscribe to.",
+                    },
+                    "joint_state_topic": {
+                        "type": "string",
+                        "description": "JointState topic (e.g. '/joint_states').",
+                    },
+                    "cmd_vel_topic": {
+                        "type": "string",
+                        "description": "Twist command topic (e.g. '/cmd_vel').",
+                    },
+                    "trajectory_setpoint_topic": {
+                        "type": "string",
+                        "description": "PX4 TrajectorySetpoint topic.",
+                    },
+                    "vehicle_rates_topic": {
+                        "type": "string",
+                        "description": "PX4 VehicleRatesSetpoint topic.",
+                    },
+                    "px4_offboard": {
+                        "type": "boolean",
+                        "description": "Enable PX4 offboard protocol (auto-detected if trajectory/rates topics set).",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
     # ---- PX4 offboard protocol ----
     {
         "type": "function",
@@ -490,6 +556,9 @@ TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {
     "heart_stop": heart_tools.heart_stop,
     "heart_switch_controller": heart_tools.heart_switch_controller,
     "heart_set_trajectory": heart_tools.heart_set_trajectory,
+    # Heart configuration tools
+    "heart_auto_configure": heart_tools.heart_auto_configure,
+    "heart_configure": heart_tools.heart_configure,
     # PX4 tools
     "px4_arm": heart_tools.px4_arm,
     "px4_disarm": heart_tools.px4_disarm,

@@ -132,6 +132,14 @@ class Heart(Node):
         # --- Flight recorder ---
         self._recorder = FlightRecorder()
 
+        # --- Tracked subscriptions & publishers (for reconfigure) ---
+        self._state_subs: list = []
+        self._cmd_vel_pub = None
+        self._traj_sp_pub = None
+        self._rates_sp_pub = None
+        self._offboard_ctrl_pub = None
+        self._vehicle_cmd_pub = None
+
         # --- State subscribers ---
         self._setup_state_subscribers(
             odom_topic=odom_topic,
@@ -141,11 +149,6 @@ class Heart(Node):
         )
 
         # --- Control publishers ---
-        self._cmd_vel_pub = None
-        self._traj_sp_pub = None
-        self._rates_sp_pub = None
-        self._offboard_ctrl_pub = None
-        self._vehicle_cmd_pub = None
         self._setup_control_publishers(
             cmd_vel_topic=cmd_vel_topic,
             trajectory_setpoint_topic=trajectory_setpoint_topic,
@@ -185,6 +188,106 @@ class Heart(Node):
             self._active_controller = ctrl
             log.info("Switched controller to %s", name)
         return True
+
+    # ------------------------------------------------------------------
+    # Runtime reconfiguration
+    # ------------------------------------------------------------------
+
+    def reconfigure(
+        self,
+        *,
+        odom_topic: str | None = None,
+        vehicle_odom_topic: str | None = None,
+        image_topics: list[str] | None = None,
+        joint_state_topic: str | None = None,
+        cmd_vel_topic: str | None = None,
+        trajectory_setpoint_topic: str | None = None,
+        vehicle_rates_topic: str | None = None,
+        px4_offboard: bool | None = None,
+    ) -> dict:
+        """Reconfigure subscriptions and publishers at runtime.
+
+        Tears down existing state subscriptions and control publishers,
+        then creates new ones based on the provided topic configuration.
+        Resets vehicle state and flight phase back to INIT so the ready-
+        gate must pass again before commanding.
+
+        Returns a summary of the new configuration.
+        """
+        # --- Tear down old state subscriptions ---
+        for sub in self._state_subs:
+            self.destroy_subscription(sub)
+        self._state_subs.clear()
+
+        # --- Tear down old control publishers ---
+        for pub in [
+            self._cmd_vel_pub,
+            self._traj_sp_pub,
+            self._rates_sp_pub,
+            self._offboard_ctrl_pub,
+            self._vehicle_cmd_pub,
+        ]:
+            if pub is not None:
+                self.destroy_publisher(pub)
+        self._cmd_vel_pub = None
+        self._traj_sp_pub = None
+        self._rates_sp_pub = None
+        self._offboard_ctrl_pub = None
+        self._vehicle_cmd_pub = None
+
+        # --- Reset state ---
+        with self._state_lock:
+            self._state = VehicleState()
+            self._state_update_count = 0
+        with self._objective_lock:
+            self._objective = ControlObjective(mode="idle")
+        self._flight_phase = FlightPhase.INIT
+        self._prev_command = None
+
+        # --- Update topic config ---
+        self._cmd_vel_topic = cmd_vel_topic
+        self._trajectory_setpoint_topic = trajectory_setpoint_topic
+        self._vehicle_rates_topic = vehicle_rates_topic
+
+        # --- Update PX4 offboard flag ---
+        if px4_offboard is not None:
+            self._px4_offboard = px4_offboard
+        else:
+            self._px4_offboard = (
+                (trajectory_setpoint_topic is not None)
+                or (vehicle_rates_topic is not None)
+            )
+        self._px4_armed = False
+        self._px4_offboard_mode = False
+        self._px4_offboard_heartbeat_count = 0
+
+        # --- Create new subscriptions ---
+        self._setup_state_subscribers(
+            odom_topic=odom_topic,
+            vehicle_odom_topic=vehicle_odom_topic,
+            image_topics=image_topics or [],
+            joint_state_topic=joint_state_topic,
+        )
+
+        # --- Create new publishers ---
+        self._setup_control_publishers(
+            cmd_vel_topic=cmd_vel_topic,
+            trajectory_setpoint_topic=trajectory_setpoint_topic,
+            vehicle_rates_topic=vehicle_rates_topic,
+        )
+
+        config = {
+            "odom_topic": odom_topic,
+            "vehicle_odom_topic": vehicle_odom_topic,
+            "image_topics": image_topics or [],
+            "joint_state_topic": joint_state_topic,
+            "cmd_vel_topic": cmd_vel_topic,
+            "trajectory_setpoint_topic": trajectory_setpoint_topic,
+            "vehicle_rates_topic": vehicle_rates_topic,
+            "px4_offboard": self._px4_offboard,
+        }
+        log.info("Heart reconfigured: %s", config)
+        return config
 
     # ------------------------------------------------------------------
     # Flight state machine
@@ -244,25 +347,29 @@ class Heart(Node):
     def _subscribe_odom(self, topic: str) -> None:
         from rosidl_runtime_py.utilities import get_message
         msg_class = get_message("nav_msgs/msg/Odometry")
-        self.create_subscription(msg_class, topic, self._on_odom, _SENSOR_QOS)
+        sub = self.create_subscription(msg_class, topic, self._on_odom, _SENSOR_QOS)
+        self._state_subs.append(sub)
         log.info("Subscribed to Odometry on %s", topic)
 
     def _subscribe_vehicle_odom(self, topic: str) -> None:
         from rosidl_runtime_py.utilities import get_message
         msg_class = get_message("px4_msgs/msg/VehicleOdometry")
-        self.create_subscription(msg_class, topic, self._on_vehicle_odom, _SENSOR_QOS)
+        sub = self.create_subscription(msg_class, topic, self._on_vehicle_odom, _SENSOR_QOS)
+        self._state_subs.append(sub)
         log.info("Subscribed to VehicleOdometry on %s", topic)
 
     def _subscribe_image(self, topic: str) -> None:
         from rosidl_runtime_py.utilities import get_message
         msg_class = get_message("sensor_msgs/msg/CompressedImage")
-        self.create_subscription(msg_class, topic, lambda m, t=topic: self._on_image(m, t), _SENSOR_QOS)
+        sub = self.create_subscription(msg_class, topic, lambda m, t=topic: self._on_image(m, t), _SENSOR_QOS)
+        self._state_subs.append(sub)
         log.info("Subscribed to CompressedImage on %s", topic)
 
     def _subscribe_joint_states(self, topic: str) -> None:
         from rosidl_runtime_py.utilities import get_message
         msg_class = get_message("sensor_msgs/msg/JointState")
-        self.create_subscription(msg_class, topic, self._on_joint_states, _SENSOR_QOS)
+        sub = self.create_subscription(msg_class, topic, self._on_joint_states, _SENSOR_QOS)
+        self._state_subs.append(sub)
         log.info("Subscribed to JointState on %s", topic)
 
     # ------------------------------------------------------------------
