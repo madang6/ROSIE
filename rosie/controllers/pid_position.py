@@ -13,7 +13,7 @@ import time
 
 import numpy as np
 
-from rosie.controllers.base import Controller
+from rosie.controllers.base import Controller, ControlContext
 from rosie.state import VehicleState, ControlObjective, ControlCommand
 
 
@@ -49,6 +49,7 @@ class PIDPositionController(Controller):
         self,
         state: VehicleState,
         objective: ControlObjective,
+        ctx: ControlContext | None = None,
     ) -> ControlCommand:
         cmd = ControlCommand()
 

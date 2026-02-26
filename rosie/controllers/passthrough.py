@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from rosie.controllers.base import Controller
+from rosie.controllers.base import Controller, ControlContext
 from rosie.state import VehicleState, ControlObjective, ControlCommand
 
 
@@ -24,6 +24,7 @@ class PassthroughController(Controller):
         self,
         state: VehicleState,
         objective: ControlObjective,
+        ctx: ControlContext | None = None,
     ) -> ControlCommand:
         cmd = ControlCommand()
 

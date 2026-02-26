@@ -112,11 +112,26 @@ class ControlObjective:
 
 
 @dataclass
+class OffboardFlags:
+    """Tells the Heart which OffboardControlMode booleans to set.
+
+    Controllers that know what they need (e.g. body-rate MPC) can
+    return this explicitly on the ControlCommand.  If None, the Heart
+    infers flags from the command fields.
+    """
+    position: bool = False
+    velocity: bool = False
+    acceleration: bool = False
+    attitude: bool = False
+    body_rate: bool = False
+
+
+@dataclass
 class ControlCommand:
     """Output of a controller — what actually gets published.
 
     The Heart translates this into the platform-specific message (Twist,
-    TrajectorySetpoint, JointTrajectory, etc.).
+    TrajectorySetpoint, VehicleRatesSetpoint, etc.).
     """
 
     # Velocity-level command (most universal)
@@ -127,6 +142,14 @@ class ControlCommand:
     position: np.ndarray | None = None
     yaw: float | None = None
 
+    # Body-rate command (PX4 VehicleRatesSetpoint — thrust + angular rates)
+    # When set, the Heart publishes VehicleRatesSetpoint instead of TrajectorySetpoint
+    thrust: float | None = None             # normalised [0, 1] or collective
+    body_rates: np.ndarray | None = None    # [roll_rate, pitch_rate, yaw_rate] rad/s
+
     # Raw joint commands (manipulators)
     joint_positions: np.ndarray | None = None
     joint_velocities: np.ndarray | None = None
+
+    # Explicit offboard flags (optional — Heart infers if None)
+    offboard_flags: OffboardFlags | None = None

@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from rosie.controllers.base import Controller
+from rosie.controllers.base import Controller, ControlContext
 from rosie.state import VehicleState, ControlObjective, ControlCommand
 
 log = logging.getLogger("rosie.controllers.learned")
@@ -65,6 +65,7 @@ class LearnedController(Controller):
         self,
         state: VehicleState,
         objective: ControlObjective,
+        ctx: ControlContext | None = None,
     ) -> ControlCommand:
         obs = self._obs_builder(state, objective)
         action = self._infer(obs)

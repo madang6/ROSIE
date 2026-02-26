@@ -17,8 +17,10 @@ import numpy as np
 import numpy.testing as npt
 
 from rosie.state import VehicleState, ControlObjective, ControlCommand
+from rosie.controllers.base import ControlContext
 from rosie.controllers.passthrough import PassthroughController
 from rosie.controllers.pid_position import PIDPositionController
+from rosie.flight import FlightPhase, ReadyGate
 
 
 # ---------------------------------------------------------------------------
