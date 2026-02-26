@@ -186,7 +186,7 @@ class TestChatPayload:
             call_args = mock_post.call_args
             payload = call_args.kwargs.get("json") or call_args[1].get("json")
             assert "tools" in payload
-            assert len(payload["tools"]) == 22
+            assert len(payload["tools"]) == 26
             assert payload["stream"] is False
 
     def test_payload_includes_system_prompt(self):

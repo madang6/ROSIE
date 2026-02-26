@@ -81,6 +81,8 @@ class Heart(Node):
         # Control output topic configuration
         cmd_vel_topic: str | None = "/cmd_vel",
         trajectory_setpoint_topic: str | None = None,    # PX4 TrajectorySetpoint
+        # PX4 offboard protocol
+        px4_offboard: bool = False,
     ) -> None:
         super().__init__("rosie_heart")
 
@@ -102,6 +104,12 @@ class Heart(Node):
         self._cmd_vel_topic = cmd_vel_topic
         self._trajectory_setpoint_topic = trajectory_setpoint_topic
 
+        # --- PX4 offboard protocol ---
+        self._px4_offboard = px4_offboard or (trajectory_setpoint_topic is not None)
+        self._px4_armed = False
+        self._px4_offboard_mode = False
+        self._px4_offboard_heartbeat_count = 0
+
         # --- State subscribers ---
         self._setup_state_subscribers(
             odom_topic=odom_topic,
@@ -113,6 +121,8 @@ class Heart(Node):
         # --- Control publishers ---
         self._cmd_vel_pub = None
         self._traj_sp_pub = None
+        self._offboard_ctrl_pub = None
+        self._vehicle_cmd_pub = None
         self._setup_control_publishers(
             cmd_vel_topic=cmd_vel_topic,
             trajectory_setpoint_topic=trajectory_setpoint_topic,
@@ -126,9 +136,10 @@ class Heart(Node):
         self._timer = self.create_timer(period, self._control_tick)
 
         log.info(
-            "Heart started — rate=%.0f Hz, controller=%s",
+            "Heart started — rate=%.0f Hz, controller=%s, px4_offboard=%s",
             control_rate_hz,
             self._active_controller.name,
+            self._px4_offboard,
         )
 
     # ------------------------------------------------------------------
@@ -279,8 +290,121 @@ class Heart(Node):
             self._tsp_cls = tsp_cls
             log.info("Publishing TrajectorySetpoint on %s", trajectory_setpoint_topic)
 
+        if self._px4_offboard:
+            self._setup_px4_publishers()
+
+    def _setup_px4_publishers(self) -> None:
+        """Set up PX4-specific publishers: OffboardControlMode, VehicleCommand."""
+        from rosidl_runtime_py.utilities import get_message
+
+        ocm_cls = get_message("px4_msgs/msg/OffboardControlMode")
+        self._offboard_ctrl_pub = self.create_publisher(
+            ocm_cls, "/fmu/in/offboard_control_mode", 10,
+        )
+        self._ocm_cls = ocm_cls
+
+        vcmd_cls = get_message("px4_msgs/msg/VehicleCommand")
+        self._vehicle_cmd_pub = self.create_publisher(
+            vcmd_cls, "/fmu/in/vehicle_command", 10,
+        )
+        self._vcmd_cls = vcmd_cls
+
+        log.info("PX4 offboard publishers ready (OffboardControlMode + VehicleCommand)")
+
+    # ------------------------------------------------------------------
+    # PX4 offboard protocol
+    # ------------------------------------------------------------------
+
+    def _publish_px4_offboard_heartbeat(self, cmd: ControlCommand) -> None:
+        """Publish OffboardControlMode every tick — PX4 requires >=2 Hz.
+
+        This tells PX4 which setpoint fields are active.
+        """
+        if self._offboard_ctrl_pub is None:
+            return
+
+        msg = self._ocm_cls()
+        msg.timestamp = self._px4_timestamp()
+
+        # Determine which control mode from the command
+        has_position = cmd.position is not None
+        has_velocity = not has_position  # velocity fallback
+
+        msg.position = has_position
+        msg.velocity = has_velocity
+        msg.acceleration = False
+        msg.attitude = False
+        msg.body_rate = False
+
+        self._offboard_ctrl_pub.publish(msg)
+        self._px4_offboard_heartbeat_count += 1
+
+    def _publish_px4_vehicle_command(self, command: int, param1: float = 0.0, param2: float = 0.0) -> None:
+        """Publish a VehicleCommand to PX4."""
+        if self._vehicle_cmd_pub is None:
+            return
+
+        msg = self._vcmd_cls()
+        msg.timestamp = self._px4_timestamp()
+        msg.command = command
+        msg.param1 = param1
+        msg.param2 = param2
+        msg.target_system = 1
+        msg.target_component = 1
+        msg.source_system = 1
+        msg.source_component = 1
+        msg.from_external = True
+        self._vehicle_cmd_pub.publish(msg)
+
+    def px4_arm(self) -> None:
+        """Send ARM command to PX4."""
+        # VehicleCommand::VEHICLE_CMD_COMPONENT_ARM_DISARM = 400
+        self._publish_px4_vehicle_command(400, param1=1.0)
+        self._px4_armed = True
+        log.info("PX4: ARM command sent")
+
+    def px4_disarm(self) -> None:
+        """Send DISARM command to PX4."""
+        self._publish_px4_vehicle_command(400, param1=0.0)
+        self._px4_armed = False
+        log.info("PX4: DISARM command sent")
+
+    def px4_set_offboard_mode(self) -> None:
+        """Switch PX4 to OFFBOARD flight mode.
+
+        PX4 requires OffboardControlMode to have been streaming for >=1 second
+        before accepting the mode switch.  The Heart handles this automatically:
+        the offboard heartbeat publishes every tick, and the mode switch is
+        sent after sufficient heartbeats have accumulated.
+        """
+        # VehicleCommand::VEHICLE_CMD_DO_SET_MODE = 176
+        # param1=1 (base mode), param2=6 (PX4 custom mode: OFFBOARD)
+        self._publish_px4_vehicle_command(176, param1=1.0, param2=6.0)
+        self._px4_offboard_mode = True
+        log.info("PX4: OFFBOARD mode command sent")
+
+    def px4_engage(self) -> None:
+        """Full offboard engagement sequence: stream heartbeats, switch mode, arm.
+
+        Safe to call multiple times — idempotent.
+        """
+        if not self._px4_offboard:
+            log.warning("px4_engage called but px4_offboard is disabled")
+            return
+        self.px4_set_offboard_mode()
+        self.px4_arm()
+
+    @staticmethod
+    def _px4_timestamp() -> int:
+        """Microsecond timestamp for PX4 messages."""
+        return int(time.time() * 1e6)
+
     def _publish_command(self, cmd: ControlCommand) -> None:
         """Translate a ControlCommand into platform-specific messages."""
+        # PX4 offboard heartbeat — MUST be published every tick
+        if self._px4_offboard:
+            self._publish_px4_offboard_heartbeat(cmd)
+
         # Twist (cmd_vel) — universal velocity command
         if self._cmd_vel_pub is not None:
             msg = self._twist_cls()
@@ -292,9 +416,16 @@ class Heart(Node):
             msg.angular.z = float(cmd.angular_velocity[2])
             self._cmd_vel_pub.publish(msg)
 
-        # PX4 TrajectorySetpoint
-        if self._traj_sp_pub is not None and cmd.position is not None:
-            msg = self._tsp_cls()
+        # PX4 TrajectorySetpoint — position or velocity mode
+        if self._traj_sp_pub is not None:
+            self._publish_px4_trajectory_setpoint(cmd)
+
+    def _publish_px4_trajectory_setpoint(self, cmd: ControlCommand) -> None:
+        """Publish TrajectorySetpoint in position or velocity mode."""
+        msg = self._tsp_cls()
+        msg.timestamp = self._px4_timestamp()
+
+        if cmd.position is not None:
             # ENU → NED for PX4
             msg.position = [
                 float(cmd.position[1]),
@@ -303,7 +434,26 @@ class Heart(Node):
             ]
             if cmd.yaw is not None:
                 msg.yaw = float(cmd.yaw)
-            self._traj_sp_pub.publish(msg)
+            else:
+                msg.yaw = float("nan")
+            # NaN velocity = don't-care (let PX4 use position mode)
+            msg.velocity = [float("nan")] * 3
+        else:
+            # Velocity-mode setpoint — ENU → NED
+            msg.velocity = [
+                float(cmd.linear_velocity[1]),
+                float(cmd.linear_velocity[0]),
+                float(-cmd.linear_velocity[2]),
+            ]
+            # NaN position = don't-care (let PX4 use velocity mode)
+            msg.position = [float("nan")] * 3
+            if cmd.angular_velocity is not None and len(cmd.angular_velocity) >= 3:
+                msg.yawspeed = float(cmd.angular_velocity[2])
+            else:
+                msg.yawspeed = float("nan")
+            msg.yaw = float("nan")
+
+        self._traj_sp_pub.publish(msg)
 
     # ------------------------------------------------------------------
     # Control loop
@@ -404,7 +554,7 @@ class Heart(Node):
         """Return a full status snapshot for the agent."""
         state = self.get_state()
         obj = self.get_objective()
-        return {
+        status = {
             "controller": self._active_controller.name,
             "available_controllers": self.get_controller_names(),
             "objective": obj.as_dict(),
@@ -412,6 +562,14 @@ class Heart(Node):
             "cmd_vel_topic": self._cmd_vel_topic,
             "trajectory_setpoint_topic": self._trajectory_setpoint_topic,
         }
+        if self._px4_offboard:
+            status["px4"] = {
+                "offboard_enabled": True,
+                "armed": self._px4_armed,
+                "offboard_mode": self._px4_offboard_mode,
+                "heartbeat_count": self._px4_offboard_heartbeat_count,
+            }
+        return status
 
 
 # ------------------------------------------------------------------

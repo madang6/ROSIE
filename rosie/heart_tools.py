@@ -129,3 +129,58 @@ def heart_set_trajectory(waypoints: list[list[float]]) -> str:
     heart.set_objective(obj)
     heart.switch_controller("pid_position")
     return json.dumps({"status": "trajectory_set", "waypoint_count": len(wps)})
+
+
+# ---------------------------------------------------------------------------
+# PX4-specific tools
+# ---------------------------------------------------------------------------
+
+
+def px4_arm() -> str:
+    """Arm the PX4 flight controller.
+
+    Must be called after px4_engage or px4_offboard_mode.  The drone
+    will not move until armed.
+    """
+    heart = _require_heart()
+    heart.px4_arm()
+    return json.dumps({"status": "armed"})
+
+
+def px4_disarm() -> str:
+    """Disarm the PX4 flight controller.
+
+    Motors will stop.  Only call this when the drone is landed.
+    """
+    heart = _require_heart()
+    heart.px4_disarm()
+    return json.dumps({"status": "disarmed"})
+
+
+def px4_offboard_mode() -> str:
+    """Switch PX4 to OFFBOARD flight mode.
+
+    The Heart must already be streaming OffboardControlMode (which it
+    does automatically every tick when any objective is set).  After this
+    call, PX4 will accept TrajectorySetpoint commands from the Heart.
+    """
+    heart = _require_heart()
+    heart.px4_set_offboard_mode()
+    return json.dumps({"status": "offboard_mode_set"})
+
+
+def px4_engage() -> str:
+    """Full offboard engagement: switch to OFFBOARD mode + ARM.
+
+    This is the single command to go from idle to flying.  After this,
+    set a velocity or position objective to move the drone.  Typical
+    PX4 offboard sequence:
+
+    1. heart_set_velocity(vz=0)   — start streaming setpoints
+    2. px4_engage()                — switch mode + arm
+    3. heart_go_to_position(...)   — fly somewhere
+    4. heart_stop() + px4_disarm() — land and stop
+    """
+    heart = _require_heart()
+    heart.px4_engage()
+    return json.dumps({"status": "engaged", "armed": True, "offboard_mode": True})

@@ -416,6 +416,49 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    # ---- PX4 offboard protocol ----
+    {
+        "type": "function",
+        "function": {
+            "name": "px4_arm",
+            "description": (
+                "Arm the PX4 flight controller. Motors will spin up. "
+                "Call px4_engage instead for the full offboard startup sequence."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "px4_disarm",
+            "description": "Disarm the PX4 flight controller. Only call when landed.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "px4_offboard_mode",
+            "description": (
+                "Switch PX4 to OFFBOARD flight mode. After this, PX4 accepts "
+                "TrajectorySetpoint commands from the Heart."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "px4_engage",
+            "description": (
+                "Full PX4 offboard engagement: OFFBOARD mode + ARM in one call. "
+                "Start streaming setpoints first (e.g. heart_set_velocity(vz=0)), "
+                "then call this, then set your real objective."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 
@@ -447,4 +490,9 @@ TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {
     "heart_stop": heart_tools.heart_stop,
     "heart_switch_controller": heart_tools.heart_switch_controller,
     "heart_set_trajectory": heart_tools.heart_set_trajectory,
+    # PX4 tools
+    "px4_arm": heart_tools.px4_arm,
+    "px4_disarm": heart_tools.px4_disarm,
+    "px4_offboard_mode": heart_tools.px4_offboard_mode,
+    "px4_engage": heart_tools.px4_engage,
 }

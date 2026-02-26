@@ -32,8 +32,8 @@ class TestToolDefinitions:
         assert not extra, f"Dispatch entries without schemas: {extra}"
 
     def test_expected_tool_count(self):
-        assert len(TOOL_DEFINITIONS) == 22
-        assert len(TOOL_FUNCTIONS) == 22
+        assert len(TOOL_DEFINITIONS) == 26
+        assert len(TOOL_FUNCTIONS) == 26
 
     def test_no_duplicate_names(self):
         names = [d["function"]["name"] for d in TOOL_DEFINITIONS]
@@ -84,6 +84,10 @@ class TestToolFunctionsCallable:
             "heart_switch_controller",
             "heart_set_trajectory",
         }
+        assert expected.issubset(TOOL_FUNCTIONS.keys())
+
+    def test_px4_tools_exist(self):
+        expected = {"px4_arm", "px4_disarm", "px4_offboard_mode", "px4_engage"}
         assert expected.issubset(TOOL_FUNCTIONS.keys())
 
 
