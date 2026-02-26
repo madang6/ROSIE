@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from rosie import ros2_tools
+from rosie import heart_tools
 
 # ---------------------------------------------------------------------------
 # Schema definitions (Ollama / OpenAI-compatible function calling format)
@@ -300,6 +301,121 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             },
         },
     },
+    # ---- Heart (state estimation + control loop) ----
+    {
+        "type": "function",
+        "function": {
+            "name": "heart_get_state",
+            "description": (
+                "Get the current fused vehicle state from the Heart: position, "
+                "velocity, orientation, joints, and active image topics. "
+                "Faster than reading individual topics."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "heart_get_status",
+            "description": (
+                "Get the full Heart status: active controller, current objective, "
+                "fused state, and configured topics."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "heart_set_velocity",
+            "description": (
+                "Command the robot to move at a sustained velocity. Unlike "
+                "ros2_publish_repeated (which stops after a duration), this "
+                "persists until you call heart_stop or set a new objective."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "vx": {"type": "number", "description": "Forward velocity m/s (default 0)."},
+                    "vy": {"type": "number", "description": "Lateral velocity m/s (default 0)."},
+                    "vz": {"type": "number", "description": "Vertical velocity m/s (default 0)."},
+                    "yaw_rate": {"type": "number", "description": "Yaw rate rad/s (default 0)."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "heart_go_to_position",
+            "description": (
+                "Navigate the robot to a target position using PID feedback "
+                "control. The Heart continuously reads state and adjusts "
+                "commands until the target is reached."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "number", "description": "Target X position (metres)."},
+                    "y": {"type": "number", "description": "Target Y position (metres)."},
+                    "z": {"type": "number", "description": "Target Z position (metres, default 0)."},
+                    "yaw": {"type": "number", "description": "Target yaw (radians, optional)."},
+                },
+                "required": ["x", "y"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "heart_stop",
+            "description": "Stop the robot by setting the objective to idle.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "heart_switch_controller",
+            "description": (
+                "Switch the active controller (e.g. 'passthrough', 'pid_position', "
+                "'learned'). Use heart_get_status to see available controllers."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "controller_name": {"type": "string", "description": "Name of the controller to activate."},
+                },
+                "required": ["controller_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "heart_set_trajectory",
+            "description": (
+                "Set a multi-waypoint trajectory for the robot to follow. "
+                "Each waypoint is [x, y, z]."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "waypoints": {
+                        "type": "array",
+                        "items": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                        },
+                        "description": "List of [x, y, z] waypoints.",
+                    },
+                },
+                "required": ["waypoints"],
+            },
+        },
+    },
 ]
 
 
@@ -323,4 +439,12 @@ TOOL_FUNCTIONS: dict[str, Callable[..., str]] = {
     "ros2_send_action_goal": ros2_tools.ros2_send_action_goal,
     "ros2_get_param": ros2_tools.ros2_get_param,
     "ros2_set_param": ros2_tools.ros2_set_param,
+    # Heart tools
+    "heart_get_state": heart_tools.heart_get_state,
+    "heart_get_status": heart_tools.heart_get_status,
+    "heart_set_velocity": heart_tools.heart_set_velocity,
+    "heart_go_to_position": heart_tools.heart_go_to_position,
+    "heart_stop": heart_tools.heart_stop,
+    "heart_switch_controller": heart_tools.heart_switch_controller,
+    "heart_set_trajectory": heart_tools.heart_set_trajectory,
 }

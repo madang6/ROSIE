@@ -32,8 +32,8 @@ class TestToolDefinitions:
         assert not extra, f"Dispatch entries without schemas: {extra}"
 
     def test_expected_tool_count(self):
-        assert len(TOOL_DEFINITIONS) == 15
-        assert len(TOOL_FUNCTIONS) == 15
+        assert len(TOOL_DEFINITIONS) == 22
+        assert len(TOOL_FUNCTIONS) == 22
 
     def test_no_duplicate_names(self):
         names = [d["function"]["name"] for d in TOOL_DEFINITIONS]
@@ -72,6 +72,18 @@ class TestToolFunctionsCallable:
 
     def test_param_tools_exist(self):
         expected = {"ros2_get_param", "ros2_set_param"}
+        assert expected.issubset(TOOL_FUNCTIONS.keys())
+
+    def test_heart_tools_exist(self):
+        expected = {
+            "heart_get_state",
+            "heart_get_status",
+            "heart_set_velocity",
+            "heart_go_to_position",
+            "heart_stop",
+            "heart_switch_controller",
+            "heart_set_trajectory",
+        }
         assert expected.issubset(TOOL_FUNCTIONS.keys())
 
 
