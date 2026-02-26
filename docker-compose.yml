@@ -1,0 +1,74 @@
+###############################################################################
+# ROSIE — ROS 2 Natural-Language Agent
+#
+# Extends the localmodels stack (Ollama + Open WebUI) with:
+#   - rosie:  FastAPI sidecar running inside a ROS 2 Humble container.
+#             It introspects the live ROS graph and translates natural-
+#             language commands into ROS 2 operations via Ollama tool-use.
+#
+# Usage:
+#   1. Start Ollama + Open WebUI (https://github.com/maximilianadang/localmodels)
+#   2. docker compose up -d          # starts the ROSIE sidecar
+#   3. Copy openwebui/rosie_pipe.py into Open WebUI's pipelines directory
+#      (or mount it as a volume — see the open-webui override below).
+#
+# The ROSIE container must share the ROS 2 DDS network with the robot.
+# For a host-networked robot stack, use `network_mode: host`.
+###############################################################################
+
+services:
+  # -- Ollama (LLM backend) --------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # -- Open WebUI (chat frontend) -------------------------------------------
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    ports:
+      - "8080:8080"
+    environment:
+      OLLAMA_BASE_URL: "http://ollama:11434"
+    volumes:
+      - open-webui-data:/app/backend/data
+      # Mount the ROSIE pipe so it's auto-discovered by Open WebUI
+      - ./openwebui/rosie_pipe.py:/app/backend/pipelines/rosie_pipe.py:ro
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  # -- ROSIE agent sidecar ---------------------------------------------------
+  rosie:
+    build: .
+    container_name: rosie
+    # Share the host network so ROS 2 DDS discovery works with the robot.
+    network_mode: host
+    environment:
+      OLLAMA_HOST: "http://localhost:11434"
+      OLLAMA_MODEL: "qwen3:14b"
+      ROS_DOMAIN_ID: "0"
+    # If your robot uses a non-default DDS config, mount it here:
+    # volumes:
+    #   - ./cyclonedds.xml:/etc/cyclonedds.xml
+    # environment:
+    #   CYCLONEDDS_URI: file:///etc/cyclonedds.xml
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama-data:
+  open-webui-data:
